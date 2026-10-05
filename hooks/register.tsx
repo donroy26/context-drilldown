@@ -114,7 +114,7 @@ async function refresh($: any, exact = false) {
       rows: {
         overview: (b?.categories ?? []).map((c: any) => ({
           label: c.name,
-          detail: c.kind,
+          detail: c.kind === 'deferred' ? '(loaded on demand, not in window)' : '',
           tokens: c.tokens,
           dim: c.kind !== 'used',
         })),
@@ -198,7 +198,8 @@ export const register: Register = on => {
     const rows = ag ? ag.rows : (s?.rows[t] ?? [])
     const isMessages = t === 'messages' || ag !== null
     const top = Math.max(1, ...rows.map(r => r.tokens))
-    const sum = rows.reduce((n, r) => n + r.tokens, 0)
+    // Dim rows (free space, the compaction buffer, deferred tools) are not in the window, so they are not summed.
+    const sum = rows.filter(r => !r.dim).reduce((n, r) => n + r.tokens, 0)
     const bar = (n: number, of: number) => {
       const fill = Math.round((n / Math.max(1, of)) * barW)
       return '█'.repeat(fill) + '░'.repeat(barW - fill)
@@ -278,7 +279,7 @@ export const register: Register = on => {
           </Box>
         )}
         <Text dimColor>
-          {rows.length} items, {k(sum)} tokens{rows.length > shown ? `, top ${shown} shown` : ''}
+          {rows.length} items, {k(sum)} tokens in context{rows.length > shown ? `, top ${shown} shown` : ''}
           {isMessages ? '  (select a message to drill in)' : t === 'agents' ? '  (select an agent to see its messages)' : ''}
         </Text>
         {rows.slice(0, shown).map((r, i) =>

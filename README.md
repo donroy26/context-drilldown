@@ -2,6 +2,10 @@
 
 A Claude Code mod that gives you a detailed, drill-down view of your context window.
 
+![The bar above the prompt: live context usage with one button per view](screenshots/prompt-bar.png)
+
+![The overview tab: each context category with its size](screenshots/overview.png)
+
 - **Band above the prompt**: live `Context 42% 85k/1M` with one-click buttons for each view.
 - **overview**: the categories `/context` shows, with bars.
 - **messages**: every message ranked by size; select one to see its text, tool calls and tool results, largest first, with previews and clickable file paths.

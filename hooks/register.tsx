@@ -255,7 +255,9 @@ export const register: Register = on => {
     const ag = t === 'agents' ? await read($, agent) : null
     const cols = e.viewport?.columns ?? 80
     const room = Math.max(3, (e.viewport?.rows ?? 24) - 7)
-    const shown = t === 'memory' ? Math.max(2, Math.floor(room / 2)) : room
+    // The pane scrolls itself (wheel, scroll keys), so every row is drawn.
+    // ponytail: capped at 400 rows to keep the drawn tree bounded; page it if sessions outgrow that
+    const shown = 400
     const barW = Math.max(6, Math.min(20, cols - 50))
 
     // Inside a subagent the list is its messages; otherwise the tab's own rows.
@@ -358,6 +360,7 @@ export const register: Register = on => {
         <Text dimColor>
           {all.length} items, {k(sum)} tokens{t === 'agents' && !ag ? ' across subagents (their own windows, not yours)' : ' in context'}
           {all.length > shown ? (isInOrder ? `, latest ${shown} shown` : `, top ${shown} shown`) : ''}
+          {all.length > room ? '  (scroll for more)' : ''}
           {isMessages ? '  (select a message to drill in)' : t === 'agents' ? '  (select an agent to see its messages)' : ''}
         </Text>
         {rows.slice(0, shown).map((r, i) =>

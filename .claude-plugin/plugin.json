@@ -1,1 +1,1 @@
-{ "name": "context-x", "version": "0.1.0", "description": "Drill-down /context: largest messages, every loaded tool, skill, memory file and agent", "types": "./types/index.d.ts" }
+{ "name": "context-drilldown", "version": "0.1.0", "description": "Drill-down /context: largest messages, every loaded tool, skill, memory file and agent", "types": "./types/index.d.ts" }

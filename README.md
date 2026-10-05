@@ -1,4 +1,4 @@
-# context-x
+# context-drilldown
 
 A Claude Code mod that gives you a detailed, drill-down view of your context window.
 
@@ -10,7 +10,7 @@ A Claude Code mod that gives you a detailed, drill-down view of your context win
 - **skills**: each skill listing and its token cost.
 - **memory**: every CLAUDE.md / rules / memory file, with full clickable paths.
 
-`/context-x` opens the pane too. **Refresh** re-estimates for free; **Exact count** uses the token-count API like `/context`.
+`/context-drilldown` opens the pane too. **Refresh** re-estimates for free; **Exact count** uses the token-count API like `/context`.
 
 Message sizes are estimates (characters / 4); category, tool, skill and memory figures come from Claude Code itself.
 
@@ -19,7 +19,7 @@ Message sizes are estimates (characters / 4); category, tool, skill and memory f
 Requires a Claude Code build with function-hook plugins (2.1.286+).
 
 ```bash
-git clone https://github.com/donroy26/context-x ~/.claude/skills/context-x
+git clone https://github.com/donroy26/context-drilldown ~/.claude/skills/context-drilldown
 ```
 
 Start a new session (or run `/reload-plugins`).

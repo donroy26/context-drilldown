@@ -3,13 +3,13 @@ import type { Register } from 'claude-code'
 
 import type { AgentView, Live, Part, Row, Snapshot, Tab } from '../types'
 
-const PANE = 'context-x'
-const tab = atom({ plugin: 'context-x', key: 'tab' } as const, 'overview')
-const snap = atom({ plugin: 'context-x', key: 'snap' } as const, null)
-const busy = atom({ plugin: 'context-x', key: 'busy' } as const, false)
-const open = atom({ plugin: 'context-x', key: 'open' } as const, null)
-const live = atom({ plugin: 'context-x', key: 'live' } as const, null)
-const agent = atom({ plugin: 'context-x', key: 'agent' } as const, null)
+const PANE = 'context-drilldown'
+const tab = atom({ plugin: 'context-drilldown', key: 'tab' } as const, 'overview')
+const snap = atom({ plugin: 'context-drilldown', key: 'snap' } as const, null)
+const busy = atom({ plugin: 'context-drilldown', key: 'busy' } as const, false)
+const open = atom({ plugin: 'context-drilldown', key: 'open' } as const, null)
+const live = atom({ plugin: 'context-drilldown', key: 'live' } as const, null)
+const agent = atom({ plugin: 'context-drilldown', key: 'agent' } as const, null)
 
 const TABS: Tab[] = ['overview', 'messages', 'agents', 'tools', 'skills', 'memory']
 // ponytail: chars/4 estimate for messages; the engine only itemizes categories, not individual messages
@@ -148,12 +148,12 @@ async function refresh($: any, exact = false) {
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    await $.command.register({ name: 'context-x', description: 'Detailed, drill-down context breakdown' })
+    await $.command.register({ name: 'context-drilldown', description: 'Detailed, drill-down context breakdown' })
     void track($)
     return next(e)
   })
 
-  on('command.run', { command: 'context-x' }, async $ => {
+  on('command.run', { command: 'context-drilldown' }, async $ => {
     await openPane($, await read($, tab))
     return { text: 'Context breakdown opened.' }
   })

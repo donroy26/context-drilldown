@@ -15,6 +15,6 @@ export type Snapshot = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'context-x': { tab: Tab; snap: Snapshot | null; busy: boolean; open: number | null; live: Live | null; agent: AgentView | null }
+    'context-drilldown': { tab: Tab; snap: Snapshot | null; busy: boolean; open: number | null; live: Live | null; agent: AgentView | null }
   }
 }

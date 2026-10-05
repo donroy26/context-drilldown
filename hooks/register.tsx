@@ -213,7 +213,7 @@ export const register: Register = on => {
 
     const credit = (
       <Text dimColor>
-        Created at <Link href="https://donsbookshelf.com/" label="Don's Bookshelf" />
+        context-drilldown plugin created at <Link href="https://donsbookshelf.com/" label="Don's Bookshelf" />
       </Text>
     )
 

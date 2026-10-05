@@ -12,7 +12,7 @@ const live = atom({ plugin: 'context-drilldown', key: 'live' } as const, null)
 const agent = atom({ plugin: 'context-drilldown', key: 'agent' } as const, null)
 
 const TABS: Tab[] = ['overview', 'messages', 'agents', 'tools', 'skills', 'memory']
-// ponytail: chars/4 per message block, scaled in refresh to the engine's Messages total; the engine itemizes categories, not messages
+// ponytail: chars/4 estimate for messages; the engine only itemizes categories, not individual messages
 const est = (s: string) => Math.ceil(s.length / 4)
 const k = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`)
 const byTokens = (a: { tokens: number }, b: { tokens: number }) => b.tokens - a.tokens
@@ -39,81 +39,45 @@ async function openPane($: any, name: Tab) {
   void refresh($)
 }
 
-// What a tool call acted on, in a few words: the task, command, file, pattern or query it names.
-function summarize(input: any): string {
-  if (!input || typeof input !== 'object') return ''
-  const path = inputPath(input)
-  const pick = [input.description, input.command, path && base(path), input.pattern, input.query, input.url, input.skill, input.prompt].find(
-    v => typeof v === 'string' && v.trim(),
-  )
-  return pick ? clip(flat(pick), 70) : ''
-}
+function messageRows(msgs: any[]): Row[] {
+  const toolName: Record<string, string> = {}
+  for (const m of msgs) for (const t of m.toolUses) toolName[t.tool_use_id] = t.tool
 
-// ponytail: a flat 1600 tokens per image or document; scaling to the engine's total absorbs the error
-const MEDIA = 1600
-const resultText = (c: any): string =>
-  typeof c === 'string' ? c : Array.isArray(c) ? c.map(x => (x?.type === 'text' ? x.text : '')).join('\n') : ''
-const resultMedia = (c: any): number =>
-  Array.isArray(c) ? c.filter(x => x?.type === 'image' || x?.type === 'document').length : 0
-
-// One row per message, from the Messages API form: every block the model is sent, thinking and reminders included.
-function messageRows(msgs: any[], scale = 1): Row[] {
-  const calls: Record<string, string> = {}
-  for (const m of msgs)
-    for (const b of Array.isArray(m.content) ? m.content : [])
-      if (b.type === 'tool_use') {
-        const what = summarize(b.input)
-        calls[b.id] = what ? `${b.name}: ${what}` : b.name
-      }
-  const n = (t: number) => Math.round(t * scale)
-
+  // A tool's output lives in the user message carrying its tool_result, so it is counted there only.
   return msgs.map((m: any, i: number) => {
     const parts: Part[] = []
-    const gist: string[] = []
-    const blocks = typeof m.content === 'string' ? [{ type: 'text', text: m.content }] : (m.content ?? [])
-    for (const b of blocks) {
-      if (b.type === 'text') {
-        const isReminder = /^\s*<(system-reminder|local-command|command-)/.test(b.text)
-        parts.push({ label: isReminder ? 'system reminder' : 'text', tokens: n(est(b.text)), preview: clip(b.text, PREVIEW) })
-        if (!isReminder) gist.push(`"${flat(b.text)}"`)
-      } else if (b.type === 'thinking') {
-        parts.push({ label: 'thinking', tokens: n(est(b.thinking ?? '')), preview: clip(b.thinking ?? '', PREVIEW) })
-      } else if (b.type === 'tool_use') {
-        const input = JSON.stringify(b.input)
-        parts.push({ label: `call ${calls[b.id]}`, tokens: n(est(input)), preview: clip(input, PREVIEW), path: inputPath(b.input) })
-        gist.push(`call ${calls[b.id]}`)
-      } else if (b.type === 'tool_result') {
-        const text = resultText(b.content)
-        const media = resultMedia(b.content)
-        const of = calls[b.tool_use_id] ?? 'unknown call'
-        parts.push({
-          label: `result of ${of}${media ? ` (+${media} image)` : ''}`,
-          tokens: n(est(text) + media * MEDIA),
-          preview: clip(text, PREVIEW),
-          isError: b.is_error || undefined,
-        })
-        gist.push(`result of ${of}`)
-      } else if (b.type === 'image' || b.type === 'document') {
-        parts.push({ label: b.type, tokens: n(MEDIA), preview: '' })
-        gist.push(`[${b.type}]`)
-      } else {
-        const raw = JSON.stringify(b)
-        parts.push({ label: b.type, tokens: n(est(raw)), preview: clip(raw, PREVIEW) })
-      }
+    if (m.text) parts.push({ label: 'text', tokens: est(m.text), preview: clip(m.text, PREVIEW) })
+    for (const t of m.toolUses) {
+      const input = JSON.stringify(t.input)
+      parts.push({ label: `call ${t.tool}`, tokens: est(input), preview: clip(input, PREVIEW), path: inputPath(t.input) })
     }
+    for (const r of m.toolResults ?? []) {
+      parts.push({
+        label: `result ${toolName[r.tool_use_id] ?? r.tool_use_id}`,
+        tokens: est(r.text ?? ''),
+        preview: clip(r.text ?? '', PREVIEW),
+        isError: r.isError || undefined,
+      })
+    }
+    const tools = m.toolUses.map((t: any) => t.tool)
+    const results = (m.toolResults ?? []).map((r: any) => toolName[r.tool_use_id] ?? '?')
+    const what = results.length
+      ? `result: ${results.join(', ')}`
+      : tools.length
+        ? `calls ${tools.join(', ')}`
+        : flat(m.text).slice(0, 60)
     return {
       label: `#${i + 1} ${m.role}`,
-      detail: clip(gist.join(' · ') || (parts[0]?.label ?? ''), 160),
-      tokens: parts.reduce((t, p) => t + p.tokens, 0),
+      detail: what,
+      tokens: parts.reduce((n, p) => n + p.tokens, 0),
       parts: parts.sort(byTokens),
     }
   })
 }
 
 async function openAgent($: any, id: string, label: string) {
-  const found = await $.session.messages({ agentId: id, as: 'api' })
-  const scale = (await read($, snap))?.scale ?? 1
-  const view: AgentView = { id, label, rows: Array.isArray(found) ? messageRows(found, scale).sort(byTokens) : [] }
+  const found = await $.session.messages({ agentId: id })
+  const view: AgentView = { id, label, rows: Array.isArray(found) ? messageRows(found).sort(byTokens) : [] }
   await update($, agent, () => view)
   await update($, open, () => null)
 }
@@ -123,45 +87,37 @@ async function refresh($: any, exact = false) {
   try {
     const usage = await $.session.usage({ breakdown: exact ? 'full' : 'summary' })
     const b = usage.context.breakdown
-    const msgs = await $.session.messages({ as: 'api' })
+    const msgs = await $.session.messages()
 
-    // Scale the per-message estimates so they add up to the engine's own Messages figure.
-    // The breakdown names its categories only by label; Messages is the row holding the conversation.
-    const raw = messageRows(msgs).reduce((t, r) => t + r.tokens, 0)
-    const engine = (b?.categories ?? []).find((c: any) => c.kind === 'used' && /^messages$/i.test(c.name))?.tokens
-    const scale = engine && raw ? engine / raw : 1
-    const messages = messageRows(msgs, scale)
+    const messages = messageRows(msgs)
 
-    // Each subagent's conversation, sized the same way. One whose transcript is gone keeps its last-seen size.
-    const before = new Map(((await read($, snap))?.rows.agents ?? []).map(r => [r.id, r]))
+    // Each subagent's conversation, sized the same way; a finished one with no saved transcript is skipped.
     const agents: Row[] = []
     for (const a of await $.agent.list()) {
-      const found = await $.session.messages({ agentId: a.id, as: 'api' })
-      const label = `${a.type}: ${a.description}`
-      if (Array.isArray(found)) {
-        agents.push({ label, detail: a.status, tokens: messageRows(found, scale).reduce((t, r) => t + r.tokens, 0), id: a.id })
-      } else {
-        agents.push({ label, detail: `${a.status}, transcript gone`, tokens: before.get(a.id)?.tokens ?? 0, id: a.id, dim: true })
-      }
+      const found = await $.session.messages({ agentId: a.id })
+      if (!Array.isArray(found)) continue
+      agents.push({
+        label: `${a.type}: ${a.description}`,
+        detail: a.status,
+        tokens: messageRows(found).reduce((n, r) => n + r.tokens, 0),
+        id: a.id,
+      })
     }
 
     const s: Snapshot = {
       at: await $.clock.now(),
       exact,
-      scale,
       model: b?.model ?? (await $.session.model()),
       total: b?.totalTokens ?? usage.context.tokens ?? 0,
       max: b?.maxTokens ?? 0,
       percent: b?.percentage ?? usage.context.percent ?? 0,
       rows: {
-        overview: (b?.categories ?? [])
-          .map((c: any) => ({
-            label: c.name,
-            detail: c.kind === 'deferred' ? '(loaded on demand, not in window)' : '',
-            tokens: c.tokens,
-            dim: c.kind !== 'used',
-          }))
-          .sort(byTokens),
+        overview: (b?.categories ?? []).map((c: any) => ({
+          label: c.name,
+          detail: c.kind === 'deferred' ? '(loaded on demand, not in window)' : '',
+          tokens: c.tokens,
+          dim: c.kind !== 'used',
+        })),
         messages: messages.sort(byTokens),
         agents: agents.sort(byTokens),
         tools: [
@@ -213,10 +169,8 @@ export const register: Register = on => {
     if (e.props.hasSurvey) return next(e)
     const { Box, Text, Button } = $.ui.resolve(e)
     const l = await read($, live)
-    const below = await next(e)
 
     return (
-      <Box flexDirection="column">
       <Box>
         <Text dimColor>
           {l ? `Context ${Math.round(l.percent)}% ${k(l.tokens)}/${k(l.window)} ` : 'Context '}
@@ -224,8 +178,6 @@ export const register: Register = on => {
         {TABS.map(name => (
           <Button key={`b-${name}`} label={name} onPress={() => openPane($, name)} />
         ))}
-      </Box>
-      {below}
       </Box>
     )
   })
@@ -327,13 +279,13 @@ export const register: Register = on => {
           </Box>
         )}
         <Text dimColor>
-          {rows.length} items, {k(sum)} tokens{t === 'agents' && !ag ? ' across subagents (their own windows, not yours)' : ' in context'}{rows.length > shown ? `, top ${shown} shown` : ''}
+          {rows.length} items, {k(sum)} tokens in context{rows.length > shown ? `, top ${shown} shown` : ''}
           {isMessages ? '  (select a message to drill in)' : t === 'agents' ? '  (select an agent to see its messages)' : ''}
         </Text>
         {rows.slice(0, shown).map((r, i) =>
           isMessages ? (
             <Button key={`m${i}`} plain label={line(r, top, r.detail)} onPress={() => update($, open, () => i)} />
-          ) : t === 'agents' && r.id && !r.dim ? (
+          ) : t === 'agents' && r.id ? (
             <Button key={`a${i}`} plain label={line(r, top, r.detail)} onPress={() => openAgent($, r.id!, r.label)} />
           ) : r.path ? (
             <Box key={`${t}-${i}`} flexDirection="column">

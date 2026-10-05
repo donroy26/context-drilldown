@@ -6,6 +6,7 @@ export type AgentView = { id: string; label: string; rows: Row[] }
 export type Snapshot = {
   at: number
   exact: boolean
+  scale: number
   model: string
   total: number
   max: number

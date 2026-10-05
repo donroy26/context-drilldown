@@ -49,6 +49,16 @@ function summarize(input: any): string {
   return pick ? clip(flat(pick), 70) : ''
 }
 
+// A reminder's first meaningful line, its tags and markdown stripped: what kind of reminder it is.
+function reminderTitle(text: string): string {
+  const line = text
+    .replace(/<\/?[\w-]+>/g, '\n')
+    .split('\n')
+    .map(l => l.replace(/^[#>*\s-]+/, '').trim())
+    .find(l => l.length > 0)
+  return line ? clip(line, 60) : '(empty)'
+}
+
 // ponytail: a flat 1600 tokens per image or document; scaling to the engine's total absorbs the error
 const MEDIA = 1600
 const resultText = (c: any): string =>
@@ -74,7 +84,11 @@ function messageRows(msgs: any[], scale = 1): Row[] {
     for (const b of blocks) {
       if (b.type === 'text') {
         const isReminder = /^\s*<(system-reminder|local-command|command-)/.test(b.text)
-        parts.push({ label: isReminder ? 'system reminder' : 'text', tokens: n(est(b.text)), preview: clip(b.text, PREVIEW) })
+        parts.push({
+          label: isReminder ? `reminder: ${reminderTitle(b.text)}` : 'text',
+          tokens: n(est(b.text)),
+          preview: clip(b.text, PREVIEW),
+        })
         if (!isReminder) gist.push(`"${flat(b.text)}"`)
       } else if (b.type === 'thinking') {
         parts.push({ label: 'thinking', tokens: n(est(b.thinking ?? '')), preview: clip(b.thinking ?? '', PREVIEW) })

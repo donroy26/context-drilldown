@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 
-import type { Live, Part, Row, Snapshot, Tab } from '../types'
+import type { AgentView, Live, Part, Row, Snapshot, Tab } from '../types'
 
 const PANE = 'context-x'
 const tab = atom({ plugin: 'context-x', key: 'tab' } as const, 'overview')
@@ -9,8 +9,9 @@ const snap = atom({ plugin: 'context-x', key: 'snap' } as const, null)
 const busy = atom({ plugin: 'context-x', key: 'busy' } as const, false)
 const open = atom({ plugin: 'context-x', key: 'open' } as const, null)
 const live = atom({ plugin: 'context-x', key: 'live' } as const, null)
+const agent = atom({ plugin: 'context-x', key: 'agent' } as const, null)
 
-const TABS: Tab[] = ['overview', 'messages', 'tools', 'skills', 'memory']
+const TABS: Tab[] = ['overview', 'messages', 'agents', 'tools', 'skills', 'memory']
 // ponytail: chars/4 estimate for messages; the engine only itemizes categories, not individual messages
 const est = (s: string) => Math.ceil(s.length / 4)
 const k = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`)
@@ -38,6 +39,49 @@ async function openPane($: any, name: Tab) {
   void refresh($)
 }
 
+function messageRows(msgs: any[]): Row[] {
+  const toolName: Record<string, string> = {}
+  for (const m of msgs) for (const t of m.toolUses) toolName[t.tool_use_id] = t.tool
+
+  // A tool's output lives in the user message carrying its tool_result, so it is counted there only.
+  return msgs.map((m: any, i: number) => {
+    const parts: Part[] = []
+    if (m.text) parts.push({ label: 'text', tokens: est(m.text), preview: clip(m.text, PREVIEW) })
+    for (const t of m.toolUses) {
+      const input = JSON.stringify(t.input)
+      parts.push({ label: `call ${t.tool}`, tokens: est(input), preview: clip(input, PREVIEW), path: inputPath(t.input) })
+    }
+    for (const r of m.toolResults ?? []) {
+      parts.push({
+        label: `result ${toolName[r.tool_use_id] ?? r.tool_use_id}`,
+        tokens: est(r.text ?? ''),
+        preview: clip(r.text ?? '', PREVIEW),
+        isError: r.isError || undefined,
+      })
+    }
+    const tools = m.toolUses.map((t: any) => t.tool)
+    const results = (m.toolResults ?? []).map((r: any) => toolName[r.tool_use_id] ?? '?')
+    const what = results.length
+      ? `result: ${results.join(', ')}`
+      : tools.length
+        ? `calls ${tools.join(', ')}`
+        : flat(m.text).slice(0, 60)
+    return {
+      label: `#${i + 1} ${m.role}`,
+      detail: what,
+      tokens: parts.reduce((n, p) => n + p.tokens, 0),
+      parts: parts.sort(byTokens),
+    }
+  })
+}
+
+async function openAgent($: any, id: string, label: string) {
+  const found = await $.session.messages({ agentId: id })
+  const view: AgentView = { id, label, rows: Array.isArray(found) ? messageRows(found).sort(byTokens) : [] }
+  await update($, agent, () => view)
+  await update($, open, () => null)
+}
+
 async function refresh($: any, exact = false) {
   await update($, busy, () => true)
   try {
@@ -45,39 +89,20 @@ async function refresh($: any, exact = false) {
     const b = usage.context.breakdown
     const msgs = await $.session.messages()
 
-    const toolName: Record<string, string> = {}
-    for (const m of msgs) for (const t of m.toolUses) toolName[t.tool_use_id] = t.tool
+    const messages = messageRows(msgs)
 
-    // A tool's output lives in the user message carrying its tool_result, so it is counted there only.
-    const messages: Row[] = msgs.map((m: any, i: number) => {
-      const parts: Part[] = []
-      if (m.text) parts.push({ label: 'text', tokens: est(m.text), preview: clip(m.text, PREVIEW) })
-      for (const t of m.toolUses) {
-        const input = JSON.stringify(t.input)
-        parts.push({ label: `call ${t.tool}`, tokens: est(input), preview: clip(input, PREVIEW), path: inputPath(t.input) })
-      }
-      for (const r of m.toolResults ?? []) {
-        parts.push({
-          label: `result ${toolName[r.tool_use_id] ?? r.tool_use_id}`,
-          tokens: est(r.text ?? ''),
-          preview: clip(r.text ?? '', PREVIEW),
-          isError: r.isError || undefined,
-        })
-      }
-      const tools = m.toolUses.map((t: any) => t.tool)
-      const results = (m.toolResults ?? []).map((r: any) => toolName[r.tool_use_id] ?? '?')
-      const what = results.length
-        ? `result: ${results.join(', ')}`
-        : tools.length
-          ? `calls ${tools.join(', ')}`
-          : flat(m.text).slice(0, 60)
-      return {
-        label: `#${i + 1} ${m.role}`,
-        detail: what,
-        tokens: parts.reduce((n, p) => n + p.tokens, 0),
-        parts: parts.sort(byTokens),
-      }
-    })
+    // Each subagent's conversation, sized the same way; a finished one with no saved transcript is skipped.
+    const agents: Row[] = []
+    for (const a of await $.agent.list()) {
+      const found = await $.session.messages({ agentId: a.id })
+      if (!Array.isArray(found)) continue
+      agents.push({
+        label: `${a.type}: ${a.description}`,
+        detail: a.status,
+        tokens: messageRows(found).reduce((n, r) => n + r.tokens, 0),
+        id: a.id,
+      })
+    }
 
     const s: Snapshot = {
       at: await $.clock.now(),
@@ -94,6 +119,7 @@ async function refresh($: any, exact = false) {
           dim: c.kind !== 'used',
         })),
         messages: messages.sort(byTokens),
+        agents: agents.sort(byTokens),
         tools: [
           ...(b?.mcpTools ?? []).map((t: any) => ({
             label: t.name,
@@ -113,6 +139,8 @@ async function refresh($: any, exact = false) {
     }
     await update($, snap, () => s)
     await update($, open, () => null)
+    const shown = await read($, agent)
+    if (shown) await openAgent($, shown.id, shown.label)
   } finally {
     await update($, busy, () => false)
   }
@@ -160,12 +188,15 @@ export const register: Register = on => {
     const t = await read($, tab)
     const isBusy = await read($, busy)
     const opened = await read($, open)
+    const ag = t === 'agents' ? await read($, agent) : null
     const cols = e.viewport?.columns ?? 80
     const room = Math.max(3, (e.viewport?.rows ?? 24) - 7)
     const shown = t === 'memory' ? Math.max(2, Math.floor(room / 2)) : room
     const barW = Math.max(6, Math.min(20, cols - 50))
 
-    const rows = s?.rows[t] ?? []
+    // Inside a subagent the list is its messages; otherwise the tab's own rows.
+    const rows = ag ? ag.rows : (s?.rows[t] ?? [])
+    const isMessages = t === 'messages' || ag !== null
     const top = Math.max(1, ...rows.map(r => r.tokens))
     const sum = rows.reduce((n, r) => n + r.tokens, 0)
     const bar = (n: number, of: number) => {
@@ -199,7 +230,7 @@ export const register: Register = on => {
       </Box>
     )
 
-    const msg = t === 'messages' && opened !== null ? rows[opened] : undefined
+    const msg = isMessages && opened !== null ? rows[opened] : undefined
     if (msg) {
       const parts = msg.parts ?? []
       // Split the pane's height between the parts: a label line plus a wrapped preview each.
@@ -240,13 +271,21 @@ export const register: Register = on => {
           ))}
         </Box>
         {header}
+        {ag && (
+          <Box>
+            <Button key="agback" label="← Agents" autoFocus onPress={() => update($, agent, () => null)} />
+            <Text> {clip(ag.label, cols - 14)}</Text>
+          </Box>
+        )}
         <Text dimColor>
           {rows.length} items, {k(sum)} tokens{rows.length > shown ? `, top ${shown} shown` : ''}
-          {t === 'messages' ? '  (select a message to drill in)' : ''}
+          {isMessages ? '  (select a message to drill in)' : t === 'agents' ? '  (select an agent to see its messages)' : ''}
         </Text>
         {rows.slice(0, shown).map((r, i) =>
-          t === 'messages' ? (
+          isMessages ? (
             <Button key={`m${i}`} plain label={line(r, top, r.detail)} onPress={() => update($, open, () => i)} />
+          ) : t === 'agents' && r.id ? (
+            <Button key={`a${i}`} plain label={line(r, top, r.detail)} onPress={() => openAgent($, r.id!, r.label)} />
           ) : r.path ? (
             <Box key={`${t}-${i}`} flexDirection="column">
               <Text dimColor={r.dim}>{line(r, top, r.detail)}</Text>

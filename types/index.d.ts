@@ -1,6 +1,6 @@
 export type Tab = 'overview' | 'messages' | 'tools' | 'skills' | 'memory' | 'agents'
 export type Part = { label: string; tokens: number; preview: string; isError?: boolean; path?: string }
-export type Row = { label: string; detail: string; tokens: number; dim?: boolean; parts?: Part[]; path?: string; id?: string }
+export type Row = { label: string; detail: string; tokens: number; dim?: boolean; parts?: Part[]; path?: string; id?: string; seq?: number }
 export type Live = { percent: number; tokens: number; window: number }
 export type AgentView = { id: string; label: string; rows: Row[] }
 export type Snapshot = {
@@ -16,6 +16,6 @@ export type Snapshot = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'context-drilldown': { tab: Tab; snap: Snapshot | null; busy: boolean; open: number | null; live: Live | null; agent: AgentView | null }
+    'context-drilldown': { tab: Tab; snap: Snapshot | null; busy: boolean; open: number | null; live: Live | null; agent: AgentView | null; inOrder: boolean }
   }
 }

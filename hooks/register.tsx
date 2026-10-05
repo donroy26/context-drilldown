@@ -10,6 +10,7 @@ const busy = atom({ plugin: 'context-drilldown', key: 'busy' } as const, false)
 const open = atom({ plugin: 'context-drilldown', key: 'open' } as const, null)
 const live = atom({ plugin: 'context-drilldown', key: 'live' } as const, null)
 const agent = atom({ plugin: 'context-drilldown', key: 'agent' } as const, null)
+const inOrder = atom({ plugin: 'context-drilldown', key: 'inOrder' } as const, false)
 
 const TABS: Tab[] = ['overview', 'messages', 'agents', 'tools', 'skills', 'memory']
 // ponytail: chars/4 per message block, scaled in refresh to the engine's Messages total; the engine itemizes categories, not messages
@@ -117,6 +118,7 @@ function messageRows(msgs: any[], scale = 1): Row[] {
     }
     return {
       label: `#${i + 1} ${m.role}`,
+      seq: i,
       detail: clip(gist.join(' · ') || (parts[0]?.label ?? ''), 160),
       tokens: parts.reduce((t, p) => t + p.tokens, 0),
       parts: parts.sort(byTokens),
@@ -257,11 +259,14 @@ export const register: Register = on => {
     const barW = Math.max(6, Math.min(20, cols - 50))
 
     // Inside a subagent the list is its messages; otherwise the tab's own rows.
-    const rows = ag ? ag.rows : (s?.rows[t] ?? [])
+    const all = ag ? ag.rows : (s?.rows[t] ?? [])
     const isMessages = t === 'messages' || ag !== null
-    const top = Math.max(1, ...rows.map(r => r.tokens))
+    const isInOrder = isMessages && (await read($, inOrder))
+    // In order: the newest messages that fit, oldest first. By size: the tab's own order, largest first.
+    const rows = isInOrder ? [...all].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0)).slice(-shown) : all
+    const top = Math.max(1, ...all.map(r => r.tokens))
     // Dim rows (free space, the compaction buffer, deferred tools) are not in the window, so they are not summed.
-    const sum = rows.filter(r => !r.dim).reduce((n, r) => n + r.tokens, 0)
+    const sum = all.filter(r => !r.dim).reduce((n, r) => n + r.tokens, 0)
     const bar = (n: number, of: number) => {
       const fill = Math.round((n / Math.max(1, of)) * barW)
       return '█'.repeat(fill) + '░'.repeat(barW - fill)
@@ -290,6 +295,16 @@ export const register: Register = on => {
         </Text>
         <Button key="r" label="Refresh" onPress={() => refresh($)} />
         <Button key="x" label="Exact count" onPress={() => refresh($, true)} />
+        {isMessages && (
+          <Button
+            key="order"
+            label={isInOrder ? 'By size' : 'In order'}
+            onPress={async () => {
+              await update($, open, () => null)
+              await update($, inOrder, v => !v)
+            }}
+          />
+        )}
       </Box>
     )
 
@@ -341,7 +356,8 @@ export const register: Register = on => {
           </Box>
         )}
         <Text dimColor>
-          {rows.length} items, {k(sum)} tokens{t === 'agents' && !ag ? ' across subagents (their own windows, not yours)' : ' in context'}{rows.length > shown ? `, top ${shown} shown` : ''}
+          {all.length} items, {k(sum)} tokens{t === 'agents' && !ag ? ' across subagents (their own windows, not yours)' : ' in context'}
+          {all.length > shown ? (isInOrder ? `, latest ${shown} shown` : `, top ${shown} shown`) : ''}
           {isMessages ? '  (select a message to drill in)' : t === 'agents' ? '  (select an agent to see its messages)' : ''}
         </Text>
         {rows.slice(0, shown).map((r, i) =>
